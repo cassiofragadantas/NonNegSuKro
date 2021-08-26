@@ -1,4 +1,4 @@
-function D_ip = nnSuKroUpdateBCD(X,Y,n,m,R,varargin)
+function [D_ip, trace] = nnSuKroUpdateBCD(X,Y,n,m,R,varargin)
 % >>> Block Coordinate Descent approach for optimizing NON-NEGATIVE HO-SuKro terms. <<<
 % This function updates the factor D within a model Y=DX, given Y and X
 % under a SuKro (sum of Kroneckers) constraint :
@@ -16,20 +16,25 @@ function D_ip = nnSuKroUpdateBCD(X,Y,n,m,R,varargin)
 % - R : Number of Kronecker summing terms
 % Optional inputs:
 % - D_ip : (R, I) cell array containing SuKro terms D{1,p} (initialization)
+% - params : struct containing customizable parameters
+%       - beta : beta-divergence parameter for data-fidelity (default beta = 1)
+%       - Stopping criteria:
+%           - N_iter : maximum number of iterations (default = 30)
+%           - rel_tol : tolerance on the frobenius norm variation on each 
+%                       block D_ip, tol = sqrt(m.*n)*rel_tol (default: 1e-4)
+%       - verbose : activate verbose trace mode (default = true)
+%       - trace_on : activate computation of trace variables (default = false)
 % 
-% Parameters :
-% - I : Number of modes, with I = length(n) = length(m)
-% - beta : beta-divergence parameter for data-fidelity (default beta = 1)
-% - Stopping criteria:
-%       - N_iter : maximum number of iterations (default = 30)
-%       - tol : tolerance on the frobenius norm variation on each block D_ip (default = sqrt(m.*n)*1e-4)
-% - verbose : activate verbose trace mode.
+% Outputs:
+% - D_ip : (R, I) cell array containing optimized SuKro terms D{1,p}
+% - trace : struct containing set of trace variables
+%       - .obj : objective function over the iterations
+%       - .time_it : execution time over the iterations
 
 
 % addpath ../tensorlab_2016-03-28/
 
 %% Parameters
-verbose = true;
 
 % dimensions
 assert(length(n)==length(m),'Vectors n and m must have the same length.')
@@ -47,26 +52,6 @@ assert( (ismatrix(Y) && size(Y,1)==prod(n)) || (ndims(Y)==I+1 && all(size(Y)==[n
         'Factor Y must be either a (n1n2n3, N) or a (n1,n2,n3,N) tensor.' )
 if ismatrix(Y), Y = reshape(Y,[n N]); end
 
-% beta-divergence
-beta = 2; 
-
-if beta < 1
-   gamma = 1/(2-beta); 
-elseif beta <= 2
-    gamma = 1;
-else
-    gamma = 1/(1-beta);
-end
-
-% Convergence measures
-N_iter = 30; % maximum number of iterations
-% N_inner = 30; % number of inner iterations (for each block)
-% obj = zeros(1,N_iter);
-
-tol = 1e-4*sqrt(m.*n);
-diff = zeros(I,R); % Frobenius norm of update on each D_ip
-converged = false;
-
 %D initialization
 if nargin > 5 % provided as an input
     D_ip = varargin{1};
@@ -80,6 +65,44 @@ else % random initialization
         end
     end    
 end
+
+params = struct;
+if nargin > 6 % customizable params
+    params = varargin{2};
+    assert(isstruct(params), 'Optional input params must be a struct.')
+end
+
+verbose = true;
+if isfield(params,'verbose'), verbose = params.verbose; end
+
+% beta-divergence
+beta = 2;
+if isfield(params,'beta'), beta = params.beta; end
+
+if beta < 1
+   gamma = 1/(2-beta); 
+elseif beta <= 2
+    gamma = 1;
+else
+    gamma = 1/(1-beta);
+end
+
+% Convergence measures
+N_iter = 30; % maximum number of iterations
+if isfield(params,'N_iter'), N_iter = params.N_iter; end
+% N_inner = 30; % number of inner iterations (for each block)
+
+rel_tol = 1e-4;
+if isfield(params,'rel_tol'), rel_tol = params.rel_tol; end
+tol = rel_tol*sqrt(m.*n);
+diff = zeros(I,R); % Frobenius norm of update on each D_ip
+converged = false;
+
+% Trace variables
+trace_on = false;
+if isfield(params,'trace_on'), trace_on = params.trace_on; end 
+trace = struct;
+if trace_on, trace.obj = zeros(1,N_iter); end
 
 %% Optimizing D, given X and Y
 
@@ -136,14 +159,19 @@ while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
         % disp(['Total nº of iterations: ' num2str(iter)]);
     end
 
-    % Alternative stop criterion (potentially more costly)
-%     % Calculate the objective function
-%     Y_r = zeros([n N]);
-%     for p=1:R
-%         %Y_r = Y_r + tmprod(X,D_ip(1:I,p),fliplr(1:I)); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
-%         Y_r = Y_r + tmprod(X,D_ip(1:I,p),1:I); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
-%     end
-%     
-%     obj(k_ALS) = norm(Y(:)-Y_r(:),'fro');
+    % Calculate the objective function
+    if trace_on
+        % reconstruction
+        Y_r = zeros([n N]);
+        for p=1:R
+            %Y_r = Y_r + tmprod(X,D_ip(1:I,p),fliplr(1:I)); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
+            Y_r = Y_r + tmprod(X,D_ip(1:I,p),1:I); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
+        end
+        
+        % Euclidean
+        trace.obj(k_ALS) = norm(Y(:)-Y_r(:),'fro'); 
+        % Beta divergence
+        % not implemented!
+    end
     
 end

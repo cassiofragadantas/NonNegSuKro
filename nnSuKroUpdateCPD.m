@@ -1,4 +1,4 @@
-function D_ip = nnSuKroUpdateCPD(X,Y,n,m,R,varargin)
+function [D_ip, trace] = nnSuKroUpdateCPD(X,Y,n,m,R,varargin)
 % >>> Iterative Projection approach for optimizing NON-NEGATIVE HO-SuKro terms. <<<
 % This function updates the factor D within a model Y=DX, given Y and X
 % under a SuKro (sum of Kroneckers) constraint :
@@ -18,19 +18,25 @@ function D_ip = nnSuKroUpdateCPD(X,Y,n,m,R,varargin)
 % - R : Number of Kronecker summing terms
 % Optional inputs:
 % - D_ip : (R, I) cell array containing SuKro terms D{1,p} (initialization)
+% - params : struct containing customizable parameters
+%       - beta : beta-divergence parameter for data-fidelity (default beta = 1)
+%       - Stopping criteria:
+%           - N_iter : maximum number of iterations (default = 30)
+%           - rel_tol : tolerance on the frobenius norm variation on D 
+%                       tol = prod(m)*prod(n)*rel_tol (default: 1e-4)
+%       - verbose : activate verbose trace mode (default = true)
+%       - trace_on : activate computation of trace variables (default = false)
 % 
-% Parameters :
-% - I : Number of modes, with I = length(n) = length(m)
-% - beta : beta-divergence parameter for data-fidelity (default beta = 1)
-% - Stopping criteria:
-%       - N_iter : maximum number of iterations (default = 30)
-%       - tol : tolerance on the frobenius norm variation on each block D_ip (default = sqrt(m.*n)*1e-4)
-% - verbose : activate verbose trace mode.
+% Outputs:
+% - D_ip : (R, I) cell array containing optimized SuKro terms D{1,p}
+% - trace : struct containing set of trace variables
+%       - .obj : objective function over the iterations
+%       - .time_it : execution time over the iterations
+
 
 % addpath ../tensorlab_2016-03-28/
 
 %% Parameters
-verbose = true;
 
 % dimensions
 assert(length(n)==length(m),'Vectors n and m must have the same length.')
@@ -47,26 +53,6 @@ if ndims(X)==I+1, X = unfold(X,ndims(X)).'; end
 assert( (ismatrix(Y) && size(Y,1)==prod(n)) || (ndims(Y)==I+1 && all(size(Y)==[n N])), ...
         'Factor Y must be either a (n1n2n3, N) or a (n1,n2,n3,N) tensor.' )
 if ndims(Y)==I+1, Y = unfold(Y,ndims(Y)).'; end
-
-% beta-divergence
-beta = 1; 
-
-if beta < 1
-   gamma = 1/(2-beta); 
-elseif beta <= 2
-    gamma = 1;
-else
-    gamma = 1/(1-beta);
-end
-
-% Convergence measures
-N_iter = 30; % maximum number of iterations
-% N_inner = 30; % number of inner iterations (for each block)
-% obj = zeros(1,N_iter);
-
-tol = 1e-4*sqrt(prod(m)*prod(n));
-diff = zeros(I,R); % Frobenius norm of update on each D_ip
-converged = false;
 
 %Nonnegative CPD model initialization
 % initialize the model
@@ -103,8 +89,44 @@ else % random initialization
     D = abs(randn(prod(n),prod(m)));
 end
 
+params = struct;
+if nargin > 6 % customizable params
+    params = varargin{2};
+    assert(isstruct(params), 'Optional input params must be a struct.')
+end
 
-%% Optimizing dictionary, given X and Y
+verbose = true;
+if isfield(params,'verbose'), verbose = params.verbose; end
+
+% beta-divergence
+beta = 2;
+if isfield(params,'beta'), beta = params.beta; end
+
+if beta < 1
+   gamma = 1/(2-beta); 
+elseif beta <= 2
+    gamma = 1;
+else
+    gamma = 1/(1-beta);
+end
+
+% Convergence measures
+N_iter = 30; % maximum number of iterations
+if isfield(params,'N_iter'), N_iter = params.N_iter; end
+% N_inner = 30; % number of inner iterations (for each block)
+
+rel_tol = 1e-4;
+if isfield(params,'rel_tol'), rel_tol = params.rel_tol; end
+tol = rel_tol*sqrt(prod(m)*prod(n));
+converged = false;
+
+% Trace variables
+trace_on = false;
+if isfield(params,'trace_on'), trace_on = params.trace_on; end 
+trace = struct;
+if trace_on, trace.obj = zeros(1,N_iter); end
+
+%% Optimizing D, given X and Y
 
 k_ALS = 0;
 while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
@@ -156,10 +178,12 @@ while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
     end
 
     % Calculate the objective function
-    % Euclidean
-%     obj(k_ALS) = norm(Y - D*X,'fro');
-    % Beta divergence
-    % not implemented!
+    if trace_on
+        % Euclidean
+        trace.obj(k_ALS) = norm(Y - D*X,'fro');
+        % Beta divergence
+        % not implemented!
+    end
 end
 
 for i0 = 1:I

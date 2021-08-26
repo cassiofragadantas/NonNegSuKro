@@ -1,6 +1,8 @@
-%TODOs
-% - output objective
-% - add params (beta, N_iter, verbose, compute_obj)
+% This script generates random factors X and D_oracle and computes Y = D_oracle*X. 
+% Then, factor D is optimized given X and Y from a random initialization
+% (using function nnSuKroUpdateBCD or nnSuKroUpdateCPD).
+% The obtained factor D is compared to D_oracle, and the reconstruction D*X
+% is compared to D_oracle*X.
 
 addpath ./misc/
 % Include tensorlab toolbox (insert your local path here)
@@ -8,16 +10,13 @@ tensorlab_path = '~/source/Backup/PhD/SuKro/ho-sukro-icassp2019/src/tensorlab_20
 assert(isfolder(tensorlab_path),'Please insert a valid local path for tensorlab toolbox')
 addpath(tensorlab_path) 
 
-
-rng(1)
-verbose = true;
+%rng(1)
 
 %% Creating data
 I = 3; % nb modes
 R = 3; % nb kronecker summing terms
 
 % sizes of factors D{i,p} is nixmi for any p
-% Simple experiment
 n = [2 2 2]; % size I
 m = [3 3 3];
 
@@ -58,7 +57,7 @@ end
 
 %% Optimizing dictionary, given X and Y
 
-% Initial estimation of D (random)
+% Random initialization for D (random)
 D_ip =  cell(I,R);
 for i = 1:I
     for p = 1:R
@@ -81,15 +80,21 @@ end
 %     end
 % end
 
-%profile on
-tic
-D_ip = nnSuKroUpdateBCD(X,Y,n,m,R,D_ip);
-%D_ip = nnSuKroUpdateCPD(X,Y,n,m,R,D);
-toc
-%profile off, profsave(profile('info'),'myprofile_results')
+% ========= SuKro optimization ==========
+% parameters (optional)
+params = struct;
+params.trace_on = true;
+params.N_iter = 20000;
+params.rel_tol = 1e-5;
+%params.verbose = false;
+%params.beta = 1;
+
+tic, [D_ip, trace] = nnSuKroUpdateBCD(X,Y,n,m,R,D_ip,params); toc
+% tic, [D_ip, trace] = nnSuKroUpdateCPD(X,Y,n,m,R,D,params); toc
 
 
-%% Dictionary error (after kron)
+%% Reconstruction errors
+% Dictionary reconstruction error
 
 D = zeros(size(prod(n),prod(m)));
 for p = 1:R
@@ -97,42 +102,43 @@ for p = 1:R
     D = D + kron(D_ip(I:-1:1,p));
 end
 
-D2 = zeros(size(prod(n),prod(m)));
-for p = 1:R
-%     D = D + kron(D_ip(1:I,p));
-    D2 = D2 + kron(D_ip(I:-1:1,p));
+fprintf('Relative reconstruction error on D: %f \n', norm(D_oracle - D, 'fro')/norm(D_oracle,'fro'))
+
+% Input signal
+Y_r = zeros([n N]);
+for p=1:R
+    %Y_r = Y_r + tmprod(X,D_ip(1:I,p),fliplr(1:I)); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
+    Y_r = Y_r + tmprod(X,D_ip(1:I,p),1:I); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
 end
 
-norm(D_oracle - D, 'fro')
-
-%% Objective function
-calc_obj = false;
-if calc_obj
-    Y_r = zeros([n N]);
-    for p=1:R
-        %Y_r = Y_r + tmprod(X,D_ip(1:I,p),fliplr(1:I)); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
-        Y_r = Y_r + tmprod(X,D_ip(1:I,p),1:I); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
-    end
-
-    obj = norm(Y(:)-Y_r(:),'fro')
-end
+fprintf('Relative reconstruction error on Y(=DX): %f \n',norm(Y(:)-Y_r(:),'fro')/norm(Y(:),'fro'))
 
 %% Plotting results
-subplot(2,R+1,[1 2]*(R+1)), semilogy(obj)
+
+figure
 % show dictionaries
 for i = 1:I
     for p = 1:R
-        subplot(2,I*R,(p-1)*I+i), imagesc(D_ip{i,p})
-        subplot(2,I*R,I*R+(p-1)*I+i), imagesc(D_ip_oracle{i,p} )
+        subplot(2,I*R,(p-1)*I+i), imagesc(D_ip_oracle{i,p})
+        subplot(2,I*R,I*R+(p-1)*I+i), imagesc(D_ip{i,p} )
     end
 end
 
-figure, subplot(2,R+1,[1 2]*(R+1)), semilogy(obj)
+figure
 % show terms (sub-dictionaries)
 for p = 1:R
-    subplot(2,R+1,p), imagesc(kron(D_ip(1:I,p)))
-    subplot(2,R+1,p+R+1), imagesc(kron(D_ip_oracle(1:I,p)))    
+    subplot(2,R,p), imagesc(kron(D_ip_oracle(1:I,p)))
+    subplot(2,R,p+R), imagesc(kron(D_ip(1:I,p)))
 end
+
+%Objective function
+if exist('params','var') && isfield(params,'trace_on') && params.trace_on
+    obj = trace.obj;
+else
+    obj = 1;
+end
+figure, semilogy(obj)
+xlabel('Iteration'), ylabel('Squared error')
 
 %% Measure RC
 measure_RC = false;
@@ -143,62 +149,3 @@ if measure_RC
     D = randn(prod(n),prod(m));
     RC
 end
-
-%% OMP
-measure_OMP_RC = false;
-if measure_OMP_RC
-    sparsity = 3;
-    % Calculate full dictionary matrix
-    D = zeros(prod(n),prod(m));
-    for p = 1:R 
-        D = D + kron(D_ip(I:-1:1,p));
-    end
-    normVec = sqrt(sum(D.^2));
-    D = D./repmat(normVec,size(D,1),1);
-    % D = bsxfun(@rdivide,D,normVec); % apparently slower
-
-    X = reshape(X,[prod(m), N]);
-    Y = reshape(Y,[prod(n), N]);
-
-    tic
-    profile on
-    for k = 1:N
-        [X(:,k), ~] = omp_Remi(Y(:,k),D,sparsity);
-    end
-    profile off
-    profsave(profile('info'),'myprofile_OMP_naive_tensor')
-    OMP_time = toc
-
-
-    tic
-    profile on
-    for k = 1:N
-        [X(:,k), ~] = omp_tensor(Y(:,k),D,sparsity, D_ip,normVec.',n,R);
-    end
-    profile off
-    profsave(profile('info'),'myprofile_OMP_naive')
-    OMP_tensor_time = toc
-
-
-    n_atoms = prod(m);
-    X2 = zeros(size(X));
-    tic
-    profile on
-    for k = 1:N
-        [X2(:,k), ~] = SolveOMP(D,Y(:,k),n_atoms,sparsity); % next parameters in order: lambdaStop, solFreq, verbose, OptTol
-    end
-    profile off
-    profsave(profile('info'),'myprofile_OMP_Cholesky')
-    OMP_time = toc
-
-    n_atoms = prod(m);
-    X2 = zeros(size(X));
-    tic
-    profile on
-    for k = 1:N
-        [X2(:,k), ~] = SolveOMP_tensor(D,Y(:,k),n_atoms,D_ip,normVec.',n,R,sparsity); % next parameters in order: lambdaStop, solFreq, verbose, OptTol
-    end
-    profile off
-    profsave(profile('info'),'myprofile_OMP_Cholesky_tensor')
-    OMP_tensor_time = toc
-end 
