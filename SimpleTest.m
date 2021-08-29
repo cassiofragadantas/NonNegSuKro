@@ -116,7 +116,7 @@ fprintf('Relative reconstruction error on Y(=DX): %f \n',norm(Y(:)-Y_r(:),'fro')
 %% Plotting results
 
 figure
-% show dictionaries
+% show terms (sub-dictionaries)
 for i = 1:I
     for p = 1:R
         subplot(2,I*R,(p-1)*I+i), imagesc(D_ip_oracle{i,p})
@@ -125,7 +125,7 @@ for i = 1:I
 end
 
 figure
-% show terms (sub-dictionaries)
+% show dictionaries
 for p = 1:R
     subplot(2,R,p), imagesc(kron(D_ip_oracle(1:I,p)))
     subplot(2,R,p+R), imagesc(kron(D_ip(1:I,p)))
@@ -139,13 +139,3 @@ else
 end
 figure, semilogy(obj)
 xlabel('Iteration'), ylabel('Squared error')
-
-%% Measure RC
-measure_RC = false;
-if measure_RC
-    % Preparation for RC calculation
-    D_terms = D_ip;
-    cpd_rank = R;
-    D = randn(prod(n),prod(m));
-    RC
-end
