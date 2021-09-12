@@ -21,7 +21,7 @@ addpath(tensorlab_path)
 rng(1)
 
 %% Creating data
-R_vec = [1 3 10 Inf]; % nb kronecker summing terms. Inf leads to unconstrained case
+R_vec = [1 3 10 20 Inf]; % nb kronecker summing terms. Inf leads to unconstrained case
 N_it = 1000; % Number of NMF iterations
 beta = 2;
 exp_type = 'Synthetic'; % Options: 'Moffett', 'Madonna' or 'Synthetic'
@@ -72,7 +72,7 @@ params.verbose = false;
 params.beta = beta;
 
 rel_err = zeros(1,N_it);
-figure(1), hold on, xlabel('Iteration'), ylabel('Approximation error')
+figure(1), hold on, xlabel('Iteration'), ylabel('Relative Approximation Error')
 legend_str = cell(1,length(R_vec));
 
 for Rk = 1:length(R_vec) % Run with different SuKro ranks
@@ -138,6 +138,15 @@ figure(1), semilogy(rel_err)
 if strcmp(exp_type,'Moffett') || strcmp(exp_type,'Madonna')
 figure(2)
 subplot(1,length(R_vec),Rk), imagesc(reshape(D(:,2),n)), title(['R =' num2str(R)])
+
+figure(2+Rk), title(['R =' num2str(R)])
+if R < inf
+    for p =1:R
+        D_term = kron(D_ip(I:-1:1,p));
+        subplot(1,R,p), imagesc(reshape(D_term(:,2),n)), 
+    end
+end
+
 end
 end
 figure(1), legend(legend_str)

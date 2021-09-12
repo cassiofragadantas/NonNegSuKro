@@ -10,7 +10,7 @@ tensorlab_path = '~/source/Backup/PhD/SuKro/ho-sukro-icassp2019/src/tensorlab_20
 assert(isfolder(tensorlab_path),'Please insert a valid local path for tensorlab toolbox')
 addpath(tensorlab_path) 
 
-%rng(1)
+rng(1)
 
 %% Creating data
 I = 3; % nb modes
@@ -84,13 +84,15 @@ end
 % parameters (optional)
 params = struct;
 params.trace_on = true;
-params.N_iter = 20000;
-params.rel_tol = 1e-5;
+params.N_iter = 20000;% Outer loop iterations. Use around 200 for nnSuKroUpdateCPD
+params.rel_tol = 1e-6;
 %params.verbose = false;
+%params.update = 'NNLS'; % NNLS algo in block update step (default = 'MM')
+%params.N_inner = 1; % Inner MM iterations (default = 10)
 %params.beta = 1;
 
 tic, [D_ip, trace] = nnSuKroUpdateBCD(X,Y,n,m,R,D_ip,params); toc
-% tic, [D_ip, trace] = nnSuKroUpdateCPD(X,Y,n,m,R,D,params); toc
+% tic, [D_ip, trace] = nnSuKroUpdateCPD(X,Y,n,m,R,D_ip,params); toc
 
 
 %% Reconstruction errors
@@ -111,11 +113,12 @@ for p=1:R
     Y_r = Y_r + tmprod(X,D_ip(1:I,p),1:I); % Y = D*X, gives sames results as Y = Y + kron(D_ip_oracle(1:I,p))*X(:);
 end
 
-fprintf('Relative reconstruction error on Y(=DX): %f \n',norm(Y(:)-Y_r(:),'fro')/norm(Y(:),'fro'))
+normY = norm(Y(:),'fro');
+fprintf('Relative reconstruction error on Y(=DX): %f \n',norm(Y(:)-Y_r(:),'fro')/normY)
 
 %% Plotting results
 
-figure
+figure(1), hold on
 % show terms (sub-dictionaries)
 for i = 1:I
     for p = 1:R
@@ -124,7 +127,7 @@ for i = 1:I
     end
 end
 
-figure
+figure(2), hold on
 % show dictionaries
 for p = 1:R
     subplot(2,R,p), imagesc(kron(D_ip_oracle(1:I,p)))
@@ -133,9 +136,8 @@ end
 
 %Objective function
 if exist('params','var') && isfield(params,'trace_on') && params.trace_on
-    obj = trace.obj;
-else
-    obj = 1;
+    figure(3), hold on, semilogy(trace.obj/normY)
+    xlabel('Iteration'), ylabel('Relative approximation error')    
+    figure(4), hold on, semilogy(trace.time_it, trace.obj/normY)
+    xlabel('Time (s)'), ylabel('Relative approximation error')  
 end
-figure, semilogy(obj)
-xlabel('Iteration'), ylabel('Squared error')

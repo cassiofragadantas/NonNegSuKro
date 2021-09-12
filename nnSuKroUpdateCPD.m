@@ -24,6 +24,8 @@ function [D_ip, trace] = nnSuKroUpdateCPD(X,Y,n,m,R,varargin)
 %           - N_iter : maximum number of iterations (default = 30)
 %           - rel_tol : tolerance on the frobenius norm variation on D 
 %                       tol = prod(m)*prod(n)*rel_tol (default: 1e-4)
+%       - update : specifies algorithm used for unconstrained updates (default = 'MM')
+%       - N_inner : number of inner iterations for MM update (default = 10)
 %       - verbose : activate verbose trace mode (default = true)
 %       - trace_on : activate computation of trace variables (default = false)
 % 
@@ -113,34 +115,45 @@ end
 % Convergence measures
 N_iter = 30; % maximum number of iterations
 if isfield(params,'N_iter'), N_iter = params.N_iter; end
-% N_inner = 30; % number of inner iterations (for each block)
+N_inner = 10; % number of MM updates before each projection (CPD) step
+if isfield(params,'N_inner'), N_inner = params.N_inner; end
 
 rel_tol = 1e-4;
 if isfield(params,'rel_tol'), rel_tol = params.rel_tol; end
 tol = rel_tol*sqrt(prod(m)*prod(n));
 converged = false;
 
+% Block update type
+if ~isfield(params,'update'), params.update = 'MM'; end
+
 % Trace variables
 trace_on = false;
 if isfield(params,'trace_on'), trace_on = params.trace_on; end 
 trace = struct;
-if trace_on, trace.obj = zeros(1,N_iter); end
+if trace_on, trace.obj = zeros(1,N_iter); trace.time_it = zeros(1,N_iter); end
 
 %% Optimizing D, given X and Y
 
 k_ALS = 0;
+tStart = tic;
 while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
-    
+
     if verbose, fprintf('%4d,',k_ALS); end
   
     D_old = D;
     
     % Conventional update on D (no SuKro constraint)
     % --- Multiplicative update (beta divergences) ---
-    D = D.*( (((D*X).^(beta-2).*Y)*X.') ./ ((D*X).^(beta-1)*X.') ).^gamma;
-    % --- Non-negative LS (beta=2 only) ---
-    % TODO! Not implemented yet. Call a pre-existing implementation.
-
+    if strcmp(params.update, 'MM')
+        for k = 1:N_inner
+        D = D.*( (((D*X).^(beta-2).*Y)*X.') ./ ((D*X).^(beta-1)*X.') ).^gamma;
+        end
+    % --- Non-negative LS (beta=2 only) BCD ---
+    else
+        assert(beta==2,'NNLS block update only applies for beta=2.')
+        D = nnlsHALSupdt(Y.',X.',D.',500); D = D.';
+    end
+    
     % Projection into SuKro model (sum of alpha separable terms)
     R_D = rearrangement_recursive(D,n,m); % Rearrangement
     
@@ -179,6 +192,7 @@ while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
 
     % Calculate the objective function
     if trace_on
+        trace.time_it(k_ALS) = toc(tStart);
         % Euclidean
         trace.obj(k_ALS) = norm(Y - D*X,'fro');
         % Beta divergence

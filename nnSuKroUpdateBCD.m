@@ -22,6 +22,8 @@ function [D_ip, trace] = nnSuKroUpdateBCD(X,Y,n,m,R,varargin)
 %           - N_iter : maximum number of iterations (default = 30)
 %           - rel_tol : tolerance on the frobenius norm variation on each 
 %                       block D_ip, tol = sqrt(m.*n)*rel_tol (default: 1e-4)
+%       - update : specifies algorithm used on the block updates (default = 'MM')
+%       - N_inner : number of inner iterations the MM block updates (default = 10)
 %       - verbose : activate verbose trace mode (default = true)
 %       - trace_on : activate computation of trace variables (default = false)
 % 
@@ -90,7 +92,8 @@ end
 % Convergence measures
 N_iter = 30; % maximum number of iterations
 if isfield(params,'N_iter'), N_iter = params.N_iter; end
-% N_inner = 30; % number of inner iterations (for each block)
+N_inner = 10; % number of inner iterations (for each block)
+if isfield(params,'N_inner'), N_inner = params.N_inner; end
 
 rel_tol = 1e-4;
 if isfield(params,'rel_tol'), rel_tol = params.rel_tol; end
@@ -98,15 +101,19 @@ tol = rel_tol*sqrt(m.*n);
 diff = zeros(I,R); % Frobenius norm of update on each D_ip
 converged = false;
 
+% Block update type
+if ~isfield(params,'update'), params.update = 'MM'; end
+
 % Trace variables
 trace_on = false;
 if isfield(params,'trace_on'), trace_on = params.trace_on; end 
 trace = struct;
-if trace_on, trace.obj = zeros(1,N_iter); end
+if trace_on, trace.obj = zeros(1,N_iter); trace.time_it = zeros(1,N_iter); end
 
 %% Optimizing D, given X and Y
 
 k_ALS = 0;
+tStart = tic;
 while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
     
     if verbose, fprintf('%4d,',k_ALS); end
@@ -126,21 +133,20 @@ while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
 
         V = unfold(Y,i0).';
         
-        V_tilde = W*H;
-
-        % Block update (H given V_tilde and W)
-%         for k = 1:N_inner
+        % Block update (H given V and W)
 
         % ---- MU ----
-        % column-wise
-    %     for m = 1:(R*m(i0)) 
-    %         H(:,m) = H(:,m).*( W.'*(V(:,m).*V_tilde(:,m).^(beta-2))./(W.'*V_tilde(:,m).^(beta-1)) ).^gamma;
-    %     end    
-        % all columns
-        H = H.*( (W.'*(V.*V_tilde.^(beta-2))) ./ (W.'*(V_tilde.^(beta-1))) ).^gamma;
+        if strcmp(params.update, 'MM')
+            for k = 1:N_inner
+            V_tilde = W*H;
+            H = H.*( (W.'*(V.*V_tilde.^(beta-2))) ./ (W.'*(V_tilde.^(beta-1))) ).^gamma;
+            end
         
         % --- NN-LS --- (beta=2 only)
-        % TODO! Not implemented yet. Call a pre-existing implementation.
+        else
+            assert(beta==2,'NNLS block update only applies for beta=2.')
+            H = nnlsHALSupdt(V,W,H,500);
+        end
         
 %         end
 
@@ -161,6 +167,8 @@ while ~converged && k_ALS <= N_iter, k_ALS = k_ALS + 1;
 
     % Calculate the objective function
     if trace_on
+        trace.time_it(k_ALS) = toc(tStart);
+        
         % reconstruction
         Y_r = zeros([n N]);
         for p=1:R
